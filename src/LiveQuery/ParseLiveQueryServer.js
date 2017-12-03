@@ -45,6 +45,8 @@ class ParseLiveQueryServer {
     const javascriptKey = Parse.javaScriptKey;
     const masterKey = config.masterKey || Parse.masterKey;
     Parse.initialize(appId, javascriptKey, masterKey);
+    this.enableAnonymousUsers = typeof config.enableAnonymousUsers != 'undefined' 
+      ? !!config.enableAnonymousUsers : true;
 
     // Initialize websocket server
     this.parseWebSocketServer = new ParseWebSocketServer(
@@ -416,6 +418,12 @@ class ParseLiveQueryServer {
   }
 
   _handleConnect(parseWebsocket: any, request: any): any {
+    if (!request.sessionToken && !this.enableAnonymousUsers)
+    {
+      Client.pushError(parseWebsocket, 6, 'Anonymous users not allowed');
+      logger.error('Anonymous users not allowed');
+      return;
+    }
     if (!this._validateKeys(request, this.keyPairs)) {
       Client.pushError(parseWebsocket, 4, 'Key in request is not valid');
       logger.error('Key in request is not valid');
@@ -469,7 +477,20 @@ class ParseLiveQueryServer {
       return;
     }
     const client = this.clients.get(parseWebsocket.clientId);
-
+    const beforeSubscribeData = {
+      event: 'beforesubscribe',
+      clients: this.clients.size,
+      subscriptions: this.subscriptions.size,
+      query: request.query,
+      sessionToken: request.sessionToken,
+      deny: false
+    }
+    runLiveQueryEventHandlers(beforeSubscribeData);
+    if (beforeSubscribeData.deny)
+    {
+      Client.pushError(parseWebsocket, 10, 'The subscription has been denied');
+      return;
+    }
     // Get subscription from subscriptions, create one if necessary
     const subscriptionHash = queryHash(request.query);
     // Add className to subscriptions if necessary
@@ -509,7 +530,7 @@ class ParseLiveQueryServer {
     runLiveQueryEventHandlers({
       event: 'subscribe',
       clients: this.clients.size,
-      subscriptions: this.subscriptions.size
+      subscriptions: this.subscriptions.size,
     });
   }
 
